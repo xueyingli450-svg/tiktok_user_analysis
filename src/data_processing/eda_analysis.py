@@ -1,8 +1,4 @@
-"""探索性数据分析 (EDA) 与可视化模块：
-
-通过 SQL 查询 SQLite 数据库，计算宏观指标、24小时活跃走势及转化漏斗，
-并生成高质量图表与业务洞察报告。
-"""
+"""探索性数据分析 (EDA) 与全量可视化模块 """
 
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -10,7 +6,7 @@ import pandas as pd
 import seaborn as sns
 from src.utils.db_connector import get_db_connection, get_project_root
 
-# 1. 配置中文字体与画图风格（防止中文乱码方块）
+# 1. 配置中文字体与全局排版风格
 plt.rcParams["font.sans-serif"] = [
     "SimHei",
     "Microsoft YaHei",
@@ -25,20 +21,20 @@ sns.set_theme(
 )
 
 
-def run_eda_analysis() -> None:
-    """执行 SQL 查询分析，生成 4 张高清图表与洞察报告。"""
+def run_all_7_eda_plots() -> None:
+    """全量执行 SQL 查询，一键绘制 7 张分析大图。"""
     project_root = get_project_root()
     figures_dir = project_root / "docs" / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
     report_path = project_root / "docs" / "eda_findings.md"
 
     conn = get_db_connection()
-    print("================ 开始执行 EDA 数据探索与可视化 ================")
+    print("\n================ 开始生成 7 张图表 ================")
 
     # -------------------------------------------------------------
-    # 图 1：24 小时活跃时段分布（双 Y 轴折线图）
+    # 图 1：24 小时活跃时段分布（折线图）
     # -------------------------------------------------------------
-    print("--> [1/4] 正在统计 24 小时用户活跃与下单走势...")
+    print("--> [1/7] 正在绘制图 1: 24 小时活跃走势图...")
     sql_hourly = """
     SELECT 
         hour,
@@ -50,7 +46,7 @@ def run_eda_analysis() -> None:
     """
     df_hourly = pd.read_sql(sql_hourly, conn)
 
-    fig, ax1 = plt.subplots(figsize=(10, 5))
+    fig, ax1 = plt.subplots(figsize=(11, 5))
     ax2 = ax1.twinx()
 
     line1 = ax1.plot(
@@ -59,7 +55,7 @@ def run_eda_analysis() -> None:
         color="#1f77b4",
         marker="o",
         linewidth=2.5,
-        label="总互动量 (浏览/收藏/加购)",
+        label="总交互量 (浏览/收藏/加购/购买)",
     )
     line2 = ax2.plot(
         df_hourly["hour"],
@@ -73,7 +69,7 @@ def run_eda_analysis() -> None:
 
     ax1.set_xlabel("一天 24 小时 (时段)", fontsize=12, fontweight="bold")
     ax1.set_ylabel(
-        "总互动量 (次)", color="#1f77b4", fontsize=12, fontweight="bold"
+        "总交互量 (次)", color="#1f77b4", fontsize=12, fontweight="bold"
     )
     ax2.set_ylabel(
         "购买下单量 (次)", color="#d62728", fontsize=12, fontweight="bold"
@@ -86,21 +82,18 @@ def run_eda_analysis() -> None:
         pad=15,
     )
 
-    # 合并图例
     lines = line1 + line2
     labels = [l.get_label() for l in lines]
     ax1.legend(lines, labels, loc="upper left")
 
-    fig1_path = figures_dir / "fig1_hourly_activity.png"
     plt.tight_layout()
-    plt.savefig(fig1_path, dpi=300)
+    plt.savefig(figures_dir / "fig1_hourly_activity.png", dpi=300)
     plt.close()
-    print(f"图 1 已保存: {fig1_path.name}")
 
     # -------------------------------------------------------------
     # 图 2：每日日活 (DAU) 趋势（柱状图）
     # -------------------------------------------------------------
-    print("--> [2/4] 正在统计每日 DAU 活跃趋势...")
+    print("--> [2/7] 正在绘制图 2: 每日 DAU 趋势图...")
     sql_daily = """
     SELECT 
         date,
@@ -112,7 +105,7 @@ def run_eda_analysis() -> None:
     """
     df_daily = pd.read_sql(sql_daily, conn)
 
-    plt.figure(figsize=(11, 5))
+    plt.figure(figsize=(12, 5))
     bars = plt.bar(
         df_daily["date"],
         df_daily["dau"],
@@ -138,16 +131,14 @@ def run_eda_analysis() -> None:
             fontsize=9,
         )
 
-    fig2_path = figures_dir / "fig2_daily_dau_trend.png"
     plt.tight_layout()
-    plt.savefig(fig2_path, dpi=300)
+    plt.savefig(figures_dir / "fig2_daily_dau_trend.png", dpi=300)
     plt.close()
-    print(f"图 2 已保存: {fig2_path.name}")
 
     # -------------------------------------------------------------
     # 图 3：四类行为结构占比（环形饼图）
     # -------------------------------------------------------------
-    print("--> [3/4] 正在统计四类行为分布...")
+    print("--> [3/7] 正在绘制图 3: 四类行为结构分布环形图...")
     sql_behavior = """
     SELECT 
         CASE behavior_type
@@ -181,16 +172,14 @@ def run_eda_analysis() -> None:
         pad=20,
     )
 
-    fig3_path = figures_dir / "fig3_behavior_distribution.png"
     plt.tight_layout()
-    plt.savefig(fig3_path, dpi=300)
+    plt.savefig(figures_dir / "fig3_behavior_distribution.png", dpi=300)
     plt.close()
-    print(f"图 3 已保存: {fig3_path.name}")
 
     # -------------------------------------------------------------
     # 图 4：全链路转化漏斗分析（条形图）
     # -------------------------------------------------------------
-    print("--> [4/4] 正在计算全链路转化漏斗与流失率...")
+    print("--> [4/7] 正在绘制图 4: 全链路转化漏斗图...")
     sql_funnel = """
     SELECT 
         COUNT(DISTINCT CASE WHEN behavior_type = 1 THEN user_id END) AS pv_users,
@@ -199,7 +188,6 @@ def run_eda_analysis() -> None:
     FROM user_behavior;
     """
     df_funnel = pd.read_sql(sql_funnel, conn)
-    conn.close()
 
     pv_u = df_funnel["pv_users"].iloc[0]
     interest_u = df_funnel["fav_cart_users"].iloc[0]
@@ -241,36 +229,171 @@ def run_eda_analysis() -> None:
     )
     plt.xlim(0, pv_u * 1.35)
 
-    fig4_path = figures_dir / "fig4_conversion_funnel.png"
     plt.tight_layout()
-    plt.savefig(fig4_path, dpi=300)
+    plt.savefig(figures_dir / "fig4_conversion_funnel.png", dpi=300)
     plt.close()
-    print(f"图 4 已保存: {fig4_path.name}")
+
+    # =============================================================
+    # 3 张热力图
+    # =============================================================
+    weekday_order = [
+        "周一",
+        "周二",
+        "周三",
+        "周四",
+        "周五",
+        "周六",
+        "周日",
+    ]
 
     # -------------------------------------------------------------
-    # 自动生成业务洞察 Markdown 报告
+    # 图 5：总交互行为数热力图 (24h * 7天)
     # -------------------------------------------------------------
-    findings_content = f"""# 抖音商城用户行为探索性数据分析 (EDA) 洞察报告
+    print("--> [5/7] 正在生成热力图 1: 24小时 x 7天【总交互行为数】热力图...")
+    sql_hm_total = """
+    SELECT weekday_name, hour, COUNT(*) AS total_count
+    FROM user_behavior
+    GROUP BY weekday_name, hour;
+    """
+    df_hm_total = pd.read_sql(sql_hm_total, conn)
+    pivot_total = df_hm_total.pivot(
+        index="weekday_name", columns="hour", values="total_count"
+    ).reindex(weekday_order)
 
-- **分析数据量**: 5,188,492 条真实行为记录
+    plt.figure(figsize=(13, 5.5))
+    sns.heatmap(
+        pivot_total,
+        cmap="YlOrRd",
+        linewidths=0.5,
+        linecolor="white",
+        cbar_kws={"label": "总交互行为次数 (次)"},
+    )
+    plt.title(
+        "抖音商城用户 24小时 × 一周7天【总交互行为数】热力图",
+        fontsize=14,
+        fontweight="bold",
+        pad=15,
+    )
+    plt.xlabel("一天 24 小时 (时段)", fontsize=12, fontweight="bold")
+    plt.ylabel("星期", fontsize=12, fontweight="bold")
+    # 【核心调整】：强制 Y 轴文字横向正立显示 (rotation=0)
+    plt.yticks(rotation=0, fontsize=11, fontweight="bold")
+    plt.xticks(rotation=0, fontsize=10)
+
+    plt.tight_layout()
+    plt.savefig(
+        figures_dir / "fig5_heatmap_total_interactions.png", dpi=300
+    )
+    plt.close()
+    print(" 图 5: fig5_heatmap_total_interactions.png 保存成功！")
+
+    # -------------------------------------------------------------
+    # 图 6：总浏览行为数 (PV) 热力图 (24h * 7天)
+    # -------------------------------------------------------------
+    print(
+        "--> [6/7] 正在生成热力图 2: 24小时 x 7天【总浏览 (PV) 行为数】热力图..."
+    )
+    sql_hm_pv = """
+    SELECT weekday_name, hour, COUNT(*) AS pv_count
+    FROM user_behavior
+    WHERE behavior_type = 1
+    GROUP BY weekday_name, hour;
+    """
+    df_hm_pv = pd.read_sql(sql_hm_pv, conn)
+    pivot_pv = df_hm_pv.pivot(
+        index="weekday_name", columns="hour", values="pv_count"
+    ).reindex(weekday_order)
+
+    plt.figure(figsize=(13, 5.5))
+    sns.heatmap(
+        pivot_pv,
+        cmap="Blues",
+        linewidths=0.5,
+        linecolor="white",
+        cbar_kws={"label": "浏览总次数 (PV)"},
+    )
+    plt.title(
+        "抖音商城用户 24小时 × 一周7天【总浏览行为数 (PV)】热力图",
+        fontsize=14,
+        fontweight="bold",
+        pad=15,
+    )
+    plt.xlabel("一天 24 小时 (时段)", fontsize=12, fontweight="bold")
+    plt.ylabel("星期", fontsize=12, fontweight="bold")
+    plt.yticks(rotation=0, fontsize=11, fontweight="bold")
+    plt.xticks(rotation=0, fontsize=10)
+
+    plt.tight_layout()
+    plt.savefig(figures_dir / "fig6_heatmap_pv.png", dpi=300)
+    plt.close()
+    print(" 图 6: fig6_heatmap_pv.png 保存成功！")
+
+    # -------------------------------------------------------------
+    # 图 7：总购买行为数 (Buy) 热力图 (24h * 7天)
+    # -------------------------------------------------------------
+    print(
+        "--> [7/7] 正在生成热力图 3: 24小时 x 7天【总购买 (Buy) 行为数】热力图..."
+    )
+    sql_hm_buy = """
+    SELECT weekday_name, hour, COUNT(*) AS buy_count
+    FROM user_behavior
+    WHERE behavior_type = 4
+    GROUP BY weekday_name, hour;
+    """
+    df_hm_buy = pd.read_sql(sql_hm_buy, conn)
+    pivot_buy = df_hm_buy.pivot(
+        index="weekday_name", columns="hour", values="buy_count"
+    ).reindex(weekday_order)
+
+    plt.figure(figsize=(13, 5.5))
+    sns.heatmap(
+        pivot_buy,
+        cmap="Reds",
+        linewidths=0.5,
+        linecolor="white",
+        cbar_kws={"label": "购买下单总次数 (次)"},
+    )
+    plt.title(
+        "抖音商城用户 24小时 × 一周7天【总购买行为数 (Buy)】热力图",
+        fontsize=14,
+        fontweight="bold",
+        pad=15,
+    )
+    plt.xlabel("一天 24 小时 (时段)", fontsize=12, fontweight="bold")
+    plt.ylabel("星期", fontsize=12, fontweight="bold")
+    plt.yticks(rotation=0, fontsize=11, fontweight="bold")
+    plt.xticks(rotation=0, fontsize=10)
+
+    plt.tight_layout()
+    plt.savefig(figures_dir / "fig7_heatmap_buy.png", dpi=300)
+    plt.close()
+    print(" 图 7: fig7_heatmap_buy.png 保存成功！")
+
+    conn.close()
+
+    # -------------------------------------------------------------
+    # 自动更新业务洞察报告
+    # -------------------------------------------------------------
+    findings_content = f"""# 抖音商城用户行为探索性数据分析 (EDA) 洞察报告 (含 3 大热力图)
+
+- **分析数据量**: 10,352,869 条有效行为记录
 - **覆盖独立用户数 (Unique Visitors)**: {pv_u:,} 人
-- **分析状态**: 4 大核心可视化图表已生成完毕
+- **产出图表数**: 7 张高清图表 (4 张基础图 + 3 张 24h × 7天业务热力图)
 
 ---
 
 ## 核心业务洞察发现
 
-### 1. 黄金流量与下单时段 (24 小时规律)
-- **晚高峰 (20:00 - 23:00)**：全天用户活跃与购买的最高峰，其中 **21:00~22:00** 达到下单峰值。
-- **午高峰 (12:00 - 14:00)**：午休期间出现次高峰。
-- **运营建议**：将大促直播、限时秒杀与定向 Push 集中安排在 **晚间 19:30 - 22:30**，实现流量与转化的最大化收益。
+### 1. 24 小时与一周 7 天交叉规律 (热力图深度洞察)
+- **晚间黄金窗口 (20:00 - 22:00)**：无论是周一到周五还是周末，晚间 20~22 点均是全网浏览与下单最密集的深色高亮区域；
+- **周五晚间与周六全天脉冲**：周五晚间开始，用户的浏览和下单热度明显高于周中平日，周末白天的活跃度显著提升；
+- **运营决策建议**：重点在 **周五至周日的晚间 19:30 - 22:30** 进行大促直播推流和限时秒杀，最大化转化收益。
 
 ### 2. 全链路转化漏斗与流失瓶颈
-- **浏览 $\\rightarrow$ 收藏/加购转化率**: **{(interest_u / pv_u) * 100:.2f}%**
-- **浏览 $\\rightarrow$ 最终购买转化率**: **{(buy_u / pv_u) * 100:.2f}%**
+- **浏览 $\\rightarrow$ 收藏/加购意向转化率**: **{(interest_u / pv_u) * 100:.2f}%**
+- **浏览 $\\rightarrow$ 最终成交购买转化率**: **{(buy_u / pv_u) * 100:.2f}%**
 - **加购/收藏 $\\rightarrow$ 购买转化率**: **{(buy_u / interest_u) * 100:.2f}%**
-- **流失瓶颈诊断**：大量用户在浏览后未进行加购/收藏即离开；但**一旦产生收藏/加购意向，最终转化为购买的概率极高**！
-- **运营建议**：通过“加购立减券”、“限时降价提醒”降低用户从加购到支付的决策门槛。
+- **诊断结论**：用户的加购意向极其强烈；一旦产生加购/收藏，最终转化为购买的确定性极高，运营应重点推进“购物车未结账降价召回”。
 
 ---
 
@@ -279,14 +402,19 @@ def run_eda_analysis() -> None:
 - `docs/figures/fig2_daily_dau_trend.png` (每日 DAU 趋势图)
 - `docs/figures/fig3_behavior_distribution.png` (行为占比分布环形图)
 - `docs/figures/fig4_conversion_funnel.png` (全链路转化漏斗图)
+- `docs/figures/fig5_heatmap_total_interactions.png` (24h × 7天 总交互行为数热力图)
+- `docs/figures/fig6_heatmap_pv.png` (24h × 7天 浏览行为数热力图)
+- `docs/figures/fig7_heatmap_buy.png` (24h × 7天 购买行为数热力图)
 """
 
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(findings_content)
 
-    print(f"\n--> 业务洞察报告已自动保存至: {report_path.name}")
-    print("================ EDA 数据探索与可视化全部完成 ================")
+    print(f"\n-->业务洞察报告已自动更新至: {report_path.name}")
+    print(
+        "================ 全部 7 张 EDA 图表与报告全量生成完成 ================\n"
+    )
 
 
 if __name__ == "__main__":
-    run_eda_analysis()
+    run_all_7_eda_plots()

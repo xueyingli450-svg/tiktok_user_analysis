@@ -7,8 +7,9 @@
 from pathlib import Path
 import pandas as pd
 
+
 def clean_user_behavior_data() -> None:
-    """读取原始用户行为数据，执行清洗、时间过滤与 IQR 异常排查。"""
+    """读取原始用户行为数据，按业务新规则执行清洗并导出 Parquet 与报告。"""
     # 1. 相对路径定位
     project_root = Path(__file__).resolve().parents[2]
     raw_data_path = (
@@ -23,7 +24,9 @@ def clean_user_behavior_data() -> None:
     output_parquet_path = processed_dir / "user_behavior_clean.parquet"
     report_md_path = docs_dir / "data_quality_report.md"
 
-    print("================ 开始执行核心数据清洗 ================")
+    print(
+        "================ 开始执行核心数据清洗 ================"
+    )
     print(f"--> 读取原始数据: {raw_data_path}")
 
     # 2. 读取原始数据
@@ -34,7 +37,7 @@ def clean_user_behavior_data() -> None:
     # 3. 工序 1：剔除缺失值 (NaN)
     df_step1 = df_raw.dropna().copy()
     null_dropped = total_raw_rows - len(df_step1)
-    print(f"--> [工序1] 缺失值清洗完成，剔除缺失行: {null_dropped:,} 行")
+    print(f"--> [1] 缺失值清洗完成，剔除缺失行: {null_dropped:,} 行")
 
     # 4. 工序 2：行为类型校验（严格限制为 1, 2, 3, 4）
     df_step1["behavior_type"] = pd.to_numeric(
@@ -45,63 +48,84 @@ def clean_user_behavior_data() -> None:
     df_step2["behavior_type"] = df_step2["behavior_type"].astype("int8")
     invalid_behavior_dropped = len(df_step1) - len(df_step2)
     print(
-        f"--> [工序2] 行为校验完成，剔除非法行为: {invalid_behavior_dropped:,} 行"
+        f"--> [2] 行为校验完成，剔除非法行为: {invalid_behavior_dropped:,} 行"
     )
 
-    # 5. 工序 3：时间格式校验与合法性过滤
+    # 5. 工序 3：时间格式校验与特征拆分（提取日期、小时、星期几）
     df_step2["datetime"] = pd.to_datetime(
         df_step2["time"], format="%Y-%m-%d %H", errors="coerce"
     )
     df_step3 = df_step2.dropna(subset=["datetime"]).copy()
     df_step3["date"] = df_step3["datetime"].dt.date.astype(str)
     df_step3["hour"] = df_step3["datetime"].dt.hour.astype("int8")
+
+    # 提取星期特征 (0=周一, 6=周日)
+    df_step3["day_of_week"] = df_step3["datetime"].dt.dayofweek.astype("int8")
+    weekday_map = {
+        0: "周一",
+        1: "周二",
+        2: "周三",
+        3: "周四",
+        4: "周五",
+        5: "周六",
+        6: "周日",
+    }
+    df_step3["weekday_name"] = df_step3["day_of_week"].map(weekday_map)
+
     invalid_time_dropped = len(df_step2) - len(df_step3)
     print(
-        f"--> [工序3] 时间解析完成，剔除异常时间: {invalid_time_dropped:,} 行"
+        f"--> [3] 时间解析与星期特征提取完成，剔除异常时间: {invalid_time_dropped:,} 行"
     )
 
-    # 6. 工序 4：业务四元组去重 (user_id, item_id, behavior_type, time)
-    df_step4 = df_step3.drop_duplicates(
-        subset=["user_id", "item_id", "behavior_type", "time"]
-    ).copy()
-    duplicate_dropped = len(df_step3) - len(df_step4)
+    # 6. 工序 4：同一小时交互 > 100 次视为恶意异常，<= 100 次完整保留
+    print("--> [4] 正在统计同一小时重复交互频次 (阈值: >100 次)...")
+    interaction_counts = df_step3.groupby(
+        ["user_id", "item_id", "behavior_type", "time"]
+    )["user_id"].transform("count")
+
+    # 保留频次 <= 100 的正常数据
+    df_step4 = df_step3[interaction_counts <= 100].copy()
+    duplicate_spam_dropped = len(df_step3) - len(df_step4)
     print(
-        f"--> [工序4] 四元组去重完成，剔除重复记录: {duplicate_dropped:,} 行"
+        f"剔除同一小时交互 >100 次的恶意刷量数据: {duplicate_spam_dropped:,} 行"
+    )
+    print(
+        f"完整保留了同一小时内的多次正常比价/浏览数据: {len(df_step4):,} 行"
     )
 
-    # 7. 工序 5：IQR 异常检测（识别并剔除极高频异常爬虫账号）
-    print("--> [工序5] 正在执行 IQR 异常检测 (排查疑似爬虫账号)...")
+    # 7. 工序 5：IQR 异常检测（剔除总频次极端的爬虫账号）
+    print("--> [5] 正在执行 IQR 异常检测 (排查疑似爬虫账号)...")
     user_counts = df_step4["user_id"].value_counts()
     q1 = user_counts.quantile(0.25)
     q3 = user_counts.quantile(0.75)
     iqr = q3 - q1
-    upper_bound = q3 + 3 * iqr  # 设定极端异常阈值
+    upper_bound = q3 + 3 * iqr
 
     abnormal_users = user_counts[user_counts > upper_bound].index
     df_clean = df_step4[~df_step4["user_id"].isin(abnormal_users)].copy()
     bot_dropped = len(df_step4) - len(df_clean)
     print(
-        f"    └─ IQR 阈值: {upper_bound:.1f} 次 | 识别异常用户: {len(abnormal_users):,} 个 | 剔除异常记录: {bot_dropped:,} 行"
+        f"IQR 阈值: {upper_bound:.1f} 次 | 识别异常用户: {len(abnormal_users):,} 个 | 剔除异常记录: {bot_dropped:,} 行"
     )
 
-    # 8. 类型优化并导出为 Parquet 格式
+    # 8. 类型压缩优化并导出为 Parquet 格式
     df_clean["user_id"] = df_clean["user_id"].astype("int32")
     df_clean["item_id"] = df_clean["item_id"].astype("int32")
     df_clean["item_category"] = df_clean["item_category"].astype("int32")
 
     print(f"\n--> 正在导出标准化 Parquet 数据至: {output_parquet_path}")
     df_clean.to_parquet(output_parquet_path, index=False, engine="pyarrow")
-    print("-->Parquet 数据导出成功！")
+    print("--> Parquet 数据导出成功！")
 
-    # 9. 自动生成《数据清洗质量报告》
+    # 9. 自动更新数据质量报告
     final_clean_rows = len(df_clean)
     total_dropped = total_raw_rows - final_clean_rows
     retention_rate = (final_clean_rows / total_raw_rows) * 100
 
-    report_content = f"""# 抖音商城用户行为数据清洗与质量报告
+    report_content = f"""# 抖音商城用户行为数据清洗与质量报告 (导师优化版)
 
 - **报告生成时间**: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}
-- **处理状态**:完成全流程清洗与 Parquet 转换
+- **处理状态**:  完成全流程清洗、正常多次交互保留、IQR 过滤与 Parquet 转换
 
 ---
 
@@ -115,7 +139,7 @@ def clean_user_behavior_data() -> None:
 | ├ 缺失值记录 (NaN) | {null_dropped:,} 行 | - |
 | ├ 非法行为类型 (非1~4) | {invalid_behavior_dropped:,} 行 | - |
 | ├ 非法时间格式记录 | {invalid_time_dropped:,} 行 | - |
-| ├ 业务四元组重复记录 | {duplicate_dropped:,} 行 | 消除用户重复误触与网络重发 |
+| ├ 同一小时极高频恶意刷量 (>100次) | {duplicate_spam_dropped:,} 行 | 保留了正常范围内的多次重复比价行为 |
 | └ **IQR 极端爬虫行为记录** | **{bot_dropped:,} 行** | 剔除 **{len(abnormal_users):,}** 个极端账号 (阈值: >{upper_bound:.1f} 次) |
 
 ---
@@ -142,8 +166,8 @@ def clean_user_behavior_data() -> None:
     with open(report_md_path, "w", encoding="utf-8") as f:
         f.write(report_content)
 
-    print(f"-->数据质量报告已自动保存至: {report_md_path}")
-    print("\n================ 数据清洗任务圆满完成 ================")
+    print(f"--> 数据质量报告已自动更新至: {report_md_path.name}")
+    print("================ 数据清洗任务圆满完成 ================")
 
 
 if __name__ == "__main__":
